@@ -1,0 +1,6 @@
+streamlit
+google-generativeai 
+torch 
+pydicom 
+opencv-python-headless 
+pillow
