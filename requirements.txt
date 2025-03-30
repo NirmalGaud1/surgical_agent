@@ -1,8 +1,7 @@
-torch
-torchvision
-streamlit
+streamlit 
 google-generativeai 
+torch 
+monai 
 pydicom 
-opencv-python-headless 
+matplotlib 
 pillow
-matplotlib
