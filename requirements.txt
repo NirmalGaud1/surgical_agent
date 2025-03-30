@@ -4,3 +4,4 @@ torch
 pydicom 
 opencv-python-headless 
 pillow
+matplotlib
