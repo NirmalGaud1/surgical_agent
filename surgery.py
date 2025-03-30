@@ -10,7 +10,6 @@ from PIL import Image
 import io
 from torch.fft import fft2, ifft2
 
-# Configuration
 API_KEY = "AIzaSyA-9-lTQTWdNM43YdOXMQwGKDy0SrMwo6c" 
 genai.configure(api_key=API_KEY)
 
@@ -44,15 +43,12 @@ class SurgicalVLM(nn.Module):
         response = self.gemini.generate_content(inputs)
         return response.text
 
-# Streamlit Interface
 st.set_page_config(page_title="Surgical AI Co-Pilot", layout="wide")
 
-# Initialize models
 if 'agent' not in st.session_state:
     st.session_state.agent = SurgicalVLM()
     st.session_state.optimizer = FFTGaLoreOptimizer(st.session_state.agent.parameters())
 
-# Patient Details Section
 with st.sidebar:
     st.header("👤 Patient Information")
     patient_id = st.text_input("Patient ID")
@@ -67,7 +63,6 @@ with st.sidebar:
     st.header("📁 Medical Imaging")
     image_file = st.file_uploader("Upload Medical Images", type=["jpg", "jpeg", "png"])
 
-# Main Interface
 st.title("🧑⚕️ Pituitary Surgery AI Co-Pilot")
 col1, col2 = st.columns([2, 3])
 
@@ -124,7 +119,6 @@ with col2:
                     "risk_assessment": "Moderate"
                 })
                 
-                # Safety checks
                 st.markdown("### 🔍 Safety Verification")
                 cols = st.columns(3)
                 cols[0].metric("Tumor Size", "18mm", "±2mm")
@@ -134,7 +128,6 @@ with col2:
             except Exception as e:
                 st.error(f"Surgical analysis failed: {str(e)}")
 
-# Emergency Protocols
 st.sidebar.markdown("---")
 if st.sidebar.button("🚨 Activate Emergency Protocol"):
     st.sidebar.error("""
