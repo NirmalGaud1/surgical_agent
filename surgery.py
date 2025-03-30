@@ -5,145 +5,148 @@ import torch
 import torch.nn as nn
 import base64
 import numpy as np
-import cv2
 from PIL import Image
 import io
-from torch.fft import fft2, ifft2
+import json
+from torchvision.models.segmentation import fcn_resnet50
+from torchvision.transforms import Compose, Resize, ToTensor, Normalize
 
 # Configuration
-API_KEY = 'AIzaSyA-9-lTQTWdNM43YdOXMQwGKDy0SrMwo6c'
+API_KEY = st.secrets["GEMINI_API_KEY"]
 genai.configure(api_key=API_KEY)
 
-class FFTGaLoreOptimizer:
-    def __init__(self, params, rank=128, lr=3e-6):
-        self.params = list(params)
-        self.rank = rank
-        self.lr = lr
-
-    def step(self):
-        for p in self.params:
-            if p.grad is None:
-                continue
-            grad = p.grad.data
-            fft_grad = fft2(grad)
-            proj_grad = ifft2(fft_grad[..., :self.rank]).real
-            p.data.add_(-self.lr * proj_grad)
-
-class SurgicalVLM(nn.Module):
+class TumorAnalyzer:
     def __init__(self):
-        super().__init__()
-        self.gemini = genai.GenerativeModel('gemini-1.5-flash')
-        self.task_head = nn.Linear(2560, 7)  # For 7 task types
-        self.vision_adapter = nn.Sequential(
-            nn.Conv2d(3, 16, 3),  # Changed for RGB images
-            nn.ReLU(),
-            nn.AdaptiveAvgPool2d((224, 224))
-        )
+        self.model = fcn_resnet50(pretrained=True).eval()
+        self.structure_coords = {
+            'optic_nerve': (100, 150),
+            'carotid': (200, 180),
+            'pituitary_gland': (150, 200)
+        }
+
+    def analyze(self, image):
+        img_tensor = self._preprocess(image)
+        with torch.no_grad():
+            output = self.model(img_tensor)['out']
+        mask = torch.argmax(output.squeeze(), dim=0).cpu().numpy()
         
-    def forward(self, inputs):
-        response = self.gemini.generate_content(inputs)
+        return {
+            'size': self._calc_size(mask),
+            'location': self._calc_location(mask),
+            'distances': self._calc_distances(mask),
+            'risk': self._assess_risk(mask)
+        }
+
+    def _preprocess(self, image):
+        transforms = Compose([
+            Resize((256, 256)),
+            ToTensor(),
+            Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+        return transforms(image).unsqueeze(0)
+
+    def _calc_size(self, mask):
+        return np.sum(mask == 1) * 0.1  # 0.1mm/pixel
+
+    def _calc_location(self, mask):
+        y, x = np.where(mask == 1)
+        return (np.mean(x), np.mean(y))
+
+    def _calc_distances(self, mask):
+        centroid = self._calc_location(mask)
+        return {
+            name: np.sqrt((centroid[0]-c[0])**2 + (centroid[1]-c[1])**2)
+            for name, c in self.structure_coords.items()
+        }
+
+    def _assess_risk(self, mask):
+        distances = self._calc_distances(mask)
+        if any(d < 5 for d in distances.values()):
+            return "High"
+        return "Moderate" if self._calc_size(mask) > 15 else "Low"
+
+class SurgicalVLM:
+    def __init__(self):
+        self.gemini = genai.GenerativeModel('gemini-1.5-flash')
+    
+    def generate_plan(self, prompt, image):
+        response = self.gemini.generate_content([prompt, image])
         return response.text
 
 # Streamlit Interface
 st.set_page_config(page_title="Surgical AI Co-Pilot", layout="wide")
 
-# Initialize models
-if 'agent' not in st.session_state:
-    st.session_state.agent = SurgicalVLM()
-    st.session_state.optimizer = FFTGaLoreOptimizer(st.session_state.agent.parameters())
+# Initialize components
+if 'analyzer' not in st.session_state:
+    st.session_state.analyzer = TumorAnalyzer()
+if 'vlmodel' not in st.session_state:
+    st.session_state.vlmodel = SurgicalVLM()
 
-# Patient Details Section
+# Sidebar
 with st.sidebar:
-    st.header("👤 Patient Information")
+    st.header("Patient Context")
     patient_id = st.text_input("Patient ID")
-    age = st.number_input("Age", min_value=0, max_value=120, value=40)
-    gender = st.selectbox("Gender", ["Male", "Female", "Other"])
-    medical_history = st.text_area("Medical History")
-    
-    st.header("🩺 Clinical Context")
-    diagnosis = st.selectbox("Diagnosis", ["Pituitary Adenoma", "Craniopharyngioma", "Meningioma"])
-    surgical_phase = st.radio("Surgical Phase", ["Nasal", "Sphenoid", "Sellar", "Closure"])
-    
-    st.header("📁 Medical Imaging")
-    image_file = st.file_uploader("Upload Medical Images", type=["jpg", "jpeg", "png"])
+    diagnosis = st.selectbox("Diagnosis", ["Pituitary Adenoma", "Meningioma", "Craniopharyngioma"])
+    surgical_phase = st.select_slider("Surgical Phase", ["Nasal", "Sphenoid", "Sellar", "Closure"])
 
 # Main Interface
-st.title("🧑⚕️ Pituitary Surgery AI Co-Pilot")
-col1, col2 = st.columns([2, 3])
+st.title("🧠 Pituitary Surgery AI Assistant")
 
-with col1:
-    st.subheader("Medical Imaging Preview")
-    if image_file:
-        img = Image.open(image_file)
-        st.image(img, caption="Uploaded Medical Image", use_column_width=True)
-        st.caption(f"Image Dimensions: {img.size[0]}x{img.size[1]} pixels")
+uploaded_image = st.file_uploader("Upload Brain MRI", type=["jpg", "jpeg", "png"])
+query = st.text_input("Surgical Query", placeholder="Ask about tumor details or surgical planning...")
 
-with col2:
-    st.subheader("AI Surgical Assistant")
-    query = st.text_input("Surgeon Query", placeholder="Ask about anatomy, instruments, or next steps...")
+if uploaded_image and query:
+    img = Image.open(uploaded_image)
+    col1, col2 = st.columns(2)
     
-    if query:
-        with st.spinner("🧠 Processing surgical context..."):
+    with col1:
+        st.image(img, caption="Uploaded MRI Scan", use_column_width=True)
+        
+        # Image analysis
+        with st.spinner("Analyzing tumor..."):
+            analysis = st.session_state.analyzer.analyze(img)
+            
+        st.subheader("Tumor Analysis")
+        st.metric("Size", f"{analysis['size']:.1f}mm")
+        st.metric("Risk Level", analysis['risk'])
+        st.write("**Critical Structure Distances:**")
+        for name, dist in analysis['distances'].items():
+            st.write(f"- {name.replace('_', ' ').title()}: {dist:.1f}px")
+
+    with col2:
+        # Generate surgical plan
+        prompt = f"""
+        Generate surgical plan for:
+        - Diagnosis: {diagnosis}
+        - Surgical Phase: {surgical_phase}
+        - Tumor Size: {analysis['size']:.1f}mm
+        - Risk Level: {analysis['risk']}
+        - Query: {query}
+
+        Format response as JSON with:
+        {{
+            "next_steps": [],
+            "instrument_recommendations": [],
+            "critical_structures": [],
+            "phase_specific_risks": ""
+        }}
+        """
+        
+        with st.spinner("Generating surgical plan..."):
             try:
-                # Build patient context
-                context = f"""
-                Patient Context:
-                - ID: {patient_id}
-                - Age: {age}
-                - Gender: {gender}
-                - Diagnosis: {diagnosis}
-                - Surgical Phase: {surgical_phase}
-                - Medical History: {medical_history}
-                """
+                response = st.session_state.vlmodel.generate_plan(prompt, img)
+                plan = json.loads(response.strip('```json\n').strip())
                 
-                # Prepare multimodal input
-                contents = [context + "\n\nSurgeon Query: " + query]
+                st.subheader("Surgical Plan")
+                st.json(plan)
                 
-                # Add image data if uploaded
-                if image_file:
-                    img = Image.open(image_file)
-                    buf = io.BytesIO()
-                    img.save(buf, format='PNG')
-                    contents.append({
-                        "mime_type": "image/png",
-                        "data": base64.b64encode(buf.getvalue()).decode()
-                    })
-                
-                # Generate response
-                response = st.session_state.agent(contents)
-                
-                # Display results
-                st.markdown(f"**AI Assistant:**\n{response}")
-                
-                # Show surgical plan
-                st.markdown("### 🗺️ Surgical Plan")
-                st.json({
-                    "current_phase": surgical_phase,
-                    "next_steps": ["Identify anatomical landmarks", "Verify instrument positioning"],
-                    "critical_structures": ["Optic nerve", "Internal carotid artery"],
-                    "risk_assessment": "Moderate"
-                })
-                
-                # Safety checks
-                st.markdown("### 🔍 Safety Verification")
-                cols = st.columns(3)
-                cols[0].metric("Tumor Size", "18mm", "±2mm")
-                cols[1].metric("Blood Loss", "150ml", "Last hour")
-                cols[2].metric("Vital Signs", "Stable", "HR: 82")
-                
+                st.subheader("Safety Alerts")
+                if analysis['risk'] == "High":
+                    st.error("🚨 Immediate Attention Required! Tumor proximity to critical structures")
+                elif analysis['risk'] == "Moderate":
+                    st.warning("⚠️ Caution Advised: Monitor vital signs closely")
+                else:
+                    st.success("✅ Low Risk Profile: Proceed with standard protocol")
+                    
             except Exception as e:
-                st.error(f"Surgical analysis failed: {str(e)}")
-
-# Emergency Protocols
-st.sidebar.markdown("---")
-if st.sidebar.button("🚨 Activate Emergency Protocol"):
-    st.sidebar.error("""
-    EMERGENCY MEASURES:
-    1. Immediate hemostasis protocol
-    2. Notify senior surgeon
-    3. Stabilize vital signs
-    4. Prepare emergency imaging
-    """)
-
-if __name__ == "__main__":
-    st.write("⚠️ **Clinical Note:** Verify all AI recommendations with surgical team")
+                st.error(f"Failed to generate plan: {str(e)}")
