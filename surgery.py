@@ -12,7 +12,7 @@ from datetime import datetime
 from torchvision.transforms import Compose, Resize, ToTensor, Normalize
 
 # Configuration
-API_KEY = st.secrets["GEMINI_API_KEY"]
+API_KEY = "AIzaSyA-9-lTQTWdNM43YdOXMQwGKDy0SrMwo6c"
 genai.configure(api_key=API_KEY)
 
 class AdvancedTumorAnalyzer:
