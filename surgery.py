@@ -12,7 +12,7 @@ from torchvision.models.segmentation import fcn_resnet50
 from torchvision.transforms import Compose, Resize, ToTensor, Normalize
 
 # Configuration
-API_KEY = st.secrets["GEMINI_API_KEY"]
+API_KEY = "AIzaSyA-9-lTQTWdNM43YdOXMQwGKDy0SrMwo6c" 
 genai.configure(api_key=API_KEY)
 
 class TumorAnalyzer:
@@ -150,4 +150,3 @@ if uploaded_image and query:
                     
             except Exception as e:
                 st.error(f"Failed to generate plan: {str(e)}")
-
